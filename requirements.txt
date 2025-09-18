@@ -1,0 +1,9 @@
+# How to fill the requirements: pip install -r requirements.txt
+fastapi>=0.100.0				# Web サーバ / API
+uvicorn[standard]>=0.24.0			# Web サーバ / API
+pydantic>=2.5.0					# Web サーバ / API
+openpyxl>=3.1.2					# Excel
+PyMuPDF>=1.23.1					# PDF
+comtypes>=1.2.0; platform_system=="Windows"	# Windows の COM API 用
+python-docx>=0.8.12				# Word / PowerPoint テキスト抽出や操作用
+python-pptx>=0.6.21				# Word / PowerPoint テキスト抽出や操作用
