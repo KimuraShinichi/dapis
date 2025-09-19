@@ -15,7 +15,7 @@ import fitz  # PyMuPDF
 import platform
 import subprocess
 
-VERSION = "0.0.20"
+VERSION = "0.1.0"
 PROGRAM = "Dapis Server"
 LIBREOFFICE = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
 
