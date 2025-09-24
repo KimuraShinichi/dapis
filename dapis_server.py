@@ -14,15 +14,84 @@ import openpyxl
 import fitz  # PyMuPDF
 import platform
 import subprocess
+import argparse
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 PROGRAM = "Dapis Server"
 LIBREOFFICE = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
 
 app = FastAPI()
 SESSIONS = {}
 
-# グローバルプロセスプール
+# -----------------------------
+# 設定管理
+# -----------------------------
+def load_config_file(file_path: str) -> list[str]:
+    argv = []
+    if not os.path.exists(file_path):
+        return argv
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            argv.extend(line.split())
+    return argv
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="Dapis Server")
+    parser.add_argument("--host", type=str, help="Server host")
+    parser.add_argument("--port", type=int, help="Server port")
+    parser.add_argument("--results_dir", type=str, help="Directory for SQLite DBs and results")
+    parser.add_argument("--targets_count_default", type=int, help="Default number of targets to display in browser")
+    parser.add_argument("--config_file", type=str, help="Path to config file", default=None)
+    return parser.parse_args(argv)
+
+class Config:
+    DEFAULTS = {
+        "host": "127.0.0.1",
+        "port": 8000,
+        "results_dir": "results",
+        "targets_count_default": 99,
+    }
+    ENV_VARS = {
+        "host": "DAPIS_HOST",
+        "port": "DAPIS_PORT",
+        "results_dir": "DAPIS_RESULTS_DIR",
+        "targets_count_default": "DAPIS_TARGETS_COUNT_DEFAULT",
+    }
+    def __init__(self):
+        self.args = parse_args()
+        file_args = []
+        if self.args.config_file:
+            file_args = load_config_file(self.args.config_file)
+        self.file_args = parse_args(file_args)
+
+    def get(self, key: str):
+        val = getattr(self.args, key, None)
+        if val is not None:
+            return val
+        val = getattr(self.file_args, key, None)
+        if val is not None:
+            return val
+        env_var = self.ENV_VARS.get(key)
+        if env_var and env_var in os.environ:
+            env_val = os.environ[env_var]
+            if isinstance(self.DEFAULTS[key], int):
+                try:
+                    return int(env_val)
+                except ValueError:
+                    pass
+            return env_val
+        return self.DEFAULTS[key]
+
+cfg = Config()
+RESULTS_DIR = cfg.get("results_dir")
+TARGETS_COUNT_DEFAULT = cfg.get("targets_count_default")
+
+# -----------------------------
+# プロセスプール・終了処理
+# -----------------------------
 executor = ProcessPoolExecutor(max_workers=multiprocessing.cpu_count())
 
 def cleanup():
@@ -35,10 +104,16 @@ def cleanup():
 
 atexit.register(cleanup)
 
+# -----------------------------
+# モデル
+# -----------------------------
 class Targets(BaseModel):
     session_id: str
     paths: list[str]
 
+# -----------------------------
+# セッション管理
+# -----------------------------
 @app.post("/submit_targets")
 async def submit_targets(data: Targets):
     SESSIONS[data.session_id] = data.paths
@@ -48,12 +123,20 @@ async def submit_targets(data: Targets):
 async def get_targets(session_id: str):
     if session_id not in SESSIONS:
         return JSONResponse({"error":"unknown session_id"}, status_code=400)
-    return {"paths": SESSIONS[session_id]}
+    # 表示件数制御
+    max_count = TARGETS_COUNT_DEFAULT
+    paths = SESSIONS[session_id]
+    displayed = paths[:max_count]
+    if len(paths) > max_count:
+        displayed.append(f"...and {len(paths)-max_count} more")
+    return {"paths": displayed}
 
+# -----------------------------
 # SQLite DB
+# -----------------------------
 def init_db(session_id: str):
-    Path("results").mkdir(exist_ok=True)
-    db_path = Path("results") / f"{session_id}.sqlite"
+    Path(RESULTS_DIR).mkdir(exist_ok=True)
+    db_path = Path(RESULTS_DIR) / f"{session_id}.sqlite"
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     cur.execute("""
